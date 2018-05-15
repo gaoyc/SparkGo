@@ -1,0 +1,8 @@
+# add the ignore files list
+.idea
+*.iml
+out
+gen
+metastore_db
+target
+derby.log
