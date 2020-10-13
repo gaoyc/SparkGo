@@ -154,7 +154,7 @@
       <!--
       <version>4.4</version>
       -->
-      <version>4.11</version>
+      <version>4.13.1</version>
       <scope>test</scope>
     </dependency>
     <dependency>
