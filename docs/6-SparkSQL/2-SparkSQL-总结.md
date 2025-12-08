@@ -1,3 +1,24 @@
+
+# 总结
+
+1. 专题原Hive使用ZLIB压缩，数据文件后缀不是.orc，因此直接编程方式加载ORC文件，除分区字段外，会丢失其它字段名信息，仅使用col0, col1, ...
+
+如果是直接spark保存的orc格式，数据文件为.orc，则会保留字段信息．
+
+如保存时使用df.format(..)partitionBy(..)指定分区保存的orc/parquet文件目录, 直接读取orc文件的方式，可以分区发现，查询也支持分区
+
+2. spark 读取的parquet文件schema改变了如何处理  
+简便的方法是加上option.通过schema合并即可  
+`spark.read.option("mergeSchema", "true").parquet(xxx).as[MyClass]`
+
+3. spark sql设置并行度的参数为spark.sql.shuffle.partitions, spark.default.parallelism这个参数是在处理RDD时才会起作用的，对Spark sql来说是无效的。
+
+如使用spark submit可通过命令指定:  
+`spark2-submit xxxxxx --conf spark.sql.shuffle.partitions=1000 xxxxxxxxxx`
+
+如在spak sql中可直接设置，例如  
+`SET spark.sql.shuffle.partitions=1000;`
+
 # DataFrame总结
 
 ## DataFrame操作
@@ -317,3 +338,50 @@ collect, count, first, head, show, take(n)
   The Spark SQL CLI is a convenient tool to run the Hive metastore service in local mode and execute queries input from the command line. Note that the Spark SQL CLI cannot talk to the Thrift JDBC server.
   To start the Spark SQL CLI, run the following in the Spark directory:
   `./bin/spark-sql`
+
+# 应用总结
+
+## 利用spark基于parquet或者orc文件直接建hive表
+
+如何快速的基于一个parquet文件进行建表？
+
+首先对于spark要SparkSession.enableHiveSupport()
+```
+var df = spark.read.parquet("mypath/*.parquet");
+df.write.mode(SaveMode.Overwrite).saveAsTable("mytable")
+```
+
+mytable可以加数据库名，如db.xxtable这种
+
+orc文件类似
+
+ps:如果想建外部表，直接option("path",mypath)即可
+
+demo:
+
+```
+spark.read.parquet("oldpath").withColumn("day",lit("2019-08-28")).write.mode("overwrite").partitionBy("day").options(Map("path"-> "new path")).saveAsTable("mytable")
+```
+
+## hive外部表指向多个文件/文件夹
+
+hive建外部表正常指向一个文件或者文件夹时很简单，然而需求是指向两个不同的文件夹起上级目录中还有其他文件不能直接指定上级目录，特此记录。
+
+新建外部分区表
+```
+//新建外部分区表
+create external table test(content string) partitioned by(date string);
+```
+     
+
+将不同的文件/文件夹指向不同分区即可
+```
+//递归读取文件夹中的文件
+set hive.mapred.supports.subdirectories=true;
+set mapred.input.dir.recursive=true;
+         
+alter table test add partition(date= '2018-11-20') location '/dir1';
+alter table test add partition(date= '2018-11-21') location '/dir2';
+```
+
+然后在表中就可以查看这两个文件夹下面的所有数据。
