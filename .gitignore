@@ -6,3 +6,4 @@ gen
 metastore_db
 target
 derby.log
+src/test/resources/backup/

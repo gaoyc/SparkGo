@@ -9,7 +9,7 @@ import org.junit.Test
   */
 class HiveDemoTest {
 
-  val sc = new SparkContext("local[*]", "testSparkSqlHiveDemo",
+  val sc = new SparkContext("local", "testSparkSqlHiveDemo",
     System.getenv(HiveDemo.SPARK_HOME), SparkContext.jarOfClass(this.getClass).toSeq )
 
   println(s"=======SPARK_HOME=${HiveDemo.SPARK_HOME}")
@@ -56,14 +56,6 @@ class HiveDemoTest {
     hiveContext.sql(sqlLoadData)*/
 
     hiveContext.sql("FROM src SELECT key, value").collect().foreach(println)
-    hiveContext.sql("").rdd.coalesce(4).map(_.mkString("${sp}")).saveAsTextFile("/tmp/rdd")
-
-    //  format: parquet orc
-    hiveContext.sql("").write.format("parquet").save("")
-
-    // saveAsTable, 另存为持久性表 即使您重新启动Spark程序，持久表仍将存在，只要您保持与同一metastore的连接即可
-    hiveContext.sql("").write.saveAsTable("")
-
 
 
   }

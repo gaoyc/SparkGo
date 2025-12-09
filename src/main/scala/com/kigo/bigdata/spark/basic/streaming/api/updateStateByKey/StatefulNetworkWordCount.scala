@@ -1,7 +1,10 @@
 package com.kigo.bigdata.spark.basic.streaming.api.updateStateByKey
 
+import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.streaming.kafka.KafkaUtils
+import org.apache.spark.streaming.dstream.DStream.toPairDStreamFunctions
+import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
+//import org.apache.spark.streaming.kafka.KafkaUtils
 import org.apache.spark.{HashPartitioner, SparkConf}
 import org.apache.spark.streaming.{Duration, Seconds, StreamingContext}
 
@@ -106,55 +109,62 @@ object WebPagePopularityValueCalculator {
     val conf = new SparkConf().setAppName("Web Page Popularity Value Calculator")
 
     val ssc = new StreamingContext(conf, Seconds(processingInterval.toInt))
-    //using updateStateByKey asks for enabling checkpoint
+    // using updateStateByKey asks for enabling checkpoint
     ssc.checkpoint(checkpointDir)
 
-    val kafkaStream = KafkaUtils.createStream(
-      //Spark streaming context
-      ssc,
-      //zookeeper quorum. e.g zkserver1:2181,zkserver2:2181,...
-      zkServers,
-      //kafka message consumer group ID
-      msgConsumerGroup,
-      //Map of (topic_name -> numPartitions) to consume. Each partition is consumed in its own thread
-      Map("user-behavior-topic" -> 3))
-    val msgDataRDD = kafkaStream.map(_._2)
+    // Spark 2.x 推荐使用 KafkaUtils.createDirectStream 或 KafkaUtils.createInputDStream
+    val kafkaParams = Map[String, Object](
+      "bootstrap.servers" -> zkServers,
+      "key.deserializer" -> classOf[StringDeserializer],
+      "value.deserializer" -> classOf[StringDeserializer],
+      "group.id" -> msgConsumerGroup,
+      "auto.offset.reset" -> "latest",
+      "enable.auto.commit" -> (false: java.lang.Boolean)
+    )
 
-    //for debug use only
-    //println("Coming data in this interval...")
-    //msgDataRDD.print()
+    val topics = Array("user-behavior-topic")
+    val kafkaStream = KafkaUtils.createDirectStream[String, String](
+      ssc,
+      LocationStrategies.PreferConsistent,
+      ConsumerStrategies.Subscribe[String, String](topics, kafkaParams)
+    )
+
+    val msgDataRDD = kafkaStream.map(record => record.value)
+
+    // for debug use only
+    // println("Coming data in this interval...")
+    // msgDataRDD.print()
     // e.g page37|5|1.5119122|-1
     val popularityData = msgDataRDD.map { msgLine => {
       val dataArr: Array[String] = msgLine.split("\\|")
       val pageID = dataArr(0)
-      //calculate the popularity value
+      // calculate the popularity value
       val popValue: Double = dataArr(1).toFloat * 0.8 + dataArr(2).toFloat * 0.8 + dataArr(3).toFloat * 1
       (pageID, popValue)
     }
     }
 
-    //sum the previous popularity value and current value
-    //定义一个匿名函数去把网页热度上一次的计算结果值和新计算的值相加，得到最新的热度值。
-    val updatePopularityValue = (iterator: Iterator[(String, Seq[Double], Option[Double])]) => {
-      iterator.flatMap(t => {
-        val newValue: Double = t._2.sum
-        val stateValue: Double = t._3.getOrElse(0);
-        Some(newValue + stateValue)
-      }.map(sumedValue => (t._1, sumedValue)))
+    // sum the previous popularity value and current value
+    // 定义一个匿名函数去把网页热度上一次的计算结果值和新计算的值相加，得到最新的热度值。
+    val updatePopularityValue = (values: Seq[Double], state: Option[Double]) => {
+      val newValue = values.sum
+      val stateValue = state.getOrElse(0.0)
+      Some(newValue + stateValue)
     }
 
-    val initialRDD = ssc.sparkContext.parallelize(List(("page1", 0.00)))
+    val initialRDD = ssc.sparkContext.parallelize(List(("page1", 0.0)))
 
-    //调用 updateStateByKey 原语并传入上面定义的匿名函数更新网页热度值。
-    val stateDStream = popularityData.updateStateByKey[Double](updatePopularityValue,
-      new HashPartitioner(ssc.sparkContext.defaultParallelism), true, initialRDD)
+    // 调用 updateStateByKey 原语并传入上面定义的匿名函数更新网页热度值。
+//    val stateDStream = popularityData.updateStateByKey[Double](updatePopularityValue,
+//      new HashPartitioner(ssc.sparkContext.defaultParallelism), true, initialRDD)
+    val stateDStream = popularityData.updateStateByKey[Double](updatePopularityValue, new HashPartitioner(ssc.sparkContext.defaultParallelism), initialRDD)
 
-    //set the checkpoint interval to avoid too frequently data checkpoint which may
-    //may significantly reduce operation throughput
+    // set the checkpoint interval to avoid too frequently data checkpoint which may
+    // significantly reduce operation throughput
     stateDStream.checkpoint(Duration(8 * processingInterval.toInt * 1000))
 
-    //after calculation, we need to sort the result and only show the top 10 hot pages
-    //最后得到最新结果后，需要对结果进行排序，最后打印热度值最高的 10 个网页。
+    // after calculation, we need to sort the result and only show the top 10 hot pages
+    // 最后得到最新结果后，需要对结果进行排序，最后打印热度值最高的 10 个网页。
     stateDStream.foreachRDD { rdd => {
       val sortedData = rdd.map { case (k, v) => (v, k) }.sortByKey(false)
       val topKData = sortedData.take(10).map { case (v, k) => (k, v) }

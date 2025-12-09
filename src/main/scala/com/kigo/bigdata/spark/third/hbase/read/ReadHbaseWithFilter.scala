@@ -8,7 +8,8 @@ import org.apache.hadoop.hbase.mapred.TableInputFormat
 import org.apache.hadoop.hbase.mapreduce.TableInputFormat
 import org.apache.hadoop.hbase.protobuf.ProtobufUtil
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.spark.{Logging, SparkConf, SparkContext}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.internal.Logging
 
 /**
   * Created by kigo on 18-4-16.

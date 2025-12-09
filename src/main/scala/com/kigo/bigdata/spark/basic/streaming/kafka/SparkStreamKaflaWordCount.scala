@@ -1,12 +1,11 @@
 package com.kigo.bigdata.spark.basic.streaming.kafka
 
-import kafka.api.OffsetRequest
-import kafka.serializer.{DefaultDecoder, StringDecoder, StringEncoder}
+//import kafka.api.OffsetRequest
+//import kafka.serializer.{DefaultDecoder, StringDecoder, StringEncoder}
 import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkConf
-import org.apache.spark.streaming.kafka.KafkaUtils
+import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
 /**
@@ -41,33 +40,32 @@ object SparkStreamKaflaWordCount {
       "value.deserializer" -> classOf[StringDeserializer],
       //用于标识这个消费者属于哪个消费团体
       ConsumerConfig.GROUP_ID_CONFIG -> group,
-        //"group.id" -> group,
+      //"group.id" -> group,
       //如果没有初始化偏移量或者当前的偏移量不存在任何服务器上，可以使用这个配置属性
       //可以使用这个配置，latest自动重置偏移量为最新的偏移量
-      ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> OffsetRequest.LargestTimeString,
-        //"auto.offset.reset" -> "latest",
+      // auto.offset.reset 的合法值变为："earliest"、"latest"、"none"
+      ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> "latest",
+      //"auto.offset.reset" -> "latest",
       //如果是true，则这个消费者的偏移量会在后台自动提交
-        //注意: spark-streaming-kafka_2.10 配置类型必须是(String, String). 待确定版本无该如下配置?
+      //注意: spark-streaming-kafka_2.10 配置类型必须是(String, String). 待确定版本无该如下配置?
       "enable.auto.commit" -> (false: java.lang.Boolean)
     );
 
     //创建DStream，返回接收到的输入数据
     // spark2.0.2 kafka_2.11-0.10.2.0 版本
-      //var stream=KafkaUtils.createDirectStream[String,String](ssc, PreferConsistent,Subscribe[String,String](topic,kafkaParam))
-      //每一个stream都是一个ConsumerRecord
-      //stream.map(s =>(s.key(),s.value())).print();
-
-    // spark-streaming-kafka_2.10
-      // 该版本的API的kafkaParams类型必须是 Map[String, String], 需要转换kafkaParam
-    val stream = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-        ssc, kafkaParam.map(t=>(t._1 -> t._2.toString)), topic.toSet)
-
-    // 如需要返回的消息为原始的字节数组, 可使用如下类型及解码器
-//   val byteStream = KafkaUtils.createDirectStream[String, Array[Byte], StringDecoder, DefaultDecoder](
-//        ssc, kafkaParam.map(t=>(t._1 -> t._2.toString)), topic.toSet)
-
+    //var stream=KafkaUtils.createDirectStream[String,String](ssc, PreferConsistent,Subscribe[String,String](topic,kafkaParam))
     //每一个stream都是一个ConsumerRecord
-    stream.map(s =>(s._1, s._2)).print();
+    //stream.map(s =>(s.key(),s.value())).print();
+
+    val stream = KafkaUtils.createDirectStream[String, String](
+      ssc,
+      LocationStrategies.PreferConsistent,
+      ConsumerStrategies.Subscribe[String, String](topic, kafkaParam)
+    )
+
+    // 处理消息 每一个stream都是一个ConsumerRecord
+    stream.map(record => (record.key, record.value)).print()
+
     ssc.start();
     ssc.awaitTermination();
   }

@@ -1,11 +1,13 @@
 package com.kigo.bigdata.spark.basic.streaming.api.updateStateByKey
 
-import java.util.Properties
+//import kafka.producer.KeyedMessage
+import org.apache.kafka.clients.producer.{KafkaProducer, Producer, ProducerConfig, ProducerRecord}
 
-import kafka.producer.{KeyedMessage, Producer, ProducerConfig}
+import java.util.Properties
+import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.{Seconds, StreamingContext}
-import org.apache.spark.streaming.kafka.KafkaUtils
+import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 
 import scala.util.Random
 
@@ -16,98 +18,105 @@ import scala.util.Random
   */
 object UpdateStateByKeyTest {
   def functionToCreateContext(): StreamingContext = {
-    //创建streamingContext
+    // 创建streamingContext
     val conf = new SparkConf().setAppName("test").setMaster("local[*]")
     val ssc = new StreamingContext(conf, Seconds(60))
 
-    //将数据进行保存（这里作为演示，生产中保存在hdfs）
+    // 将数据进行保存（这里作为演示，生产中保存在hdfs）
     ssc.checkpoint("checkPoint")
 
-    val zkQuorum = "localhost:2181,127.0.0.1:2181"
-    val consumerGroupName = "user_payment"
-    val kafkaTopic = "user_payment"
-    val kafkaThreadNum = 1
+    val kafkaParams = Map[String, Object](
+      "bootstrap.servers" -> "localhost:9092",
+      "group.id" -> "user_payment",
+      "key.deserializer" -> classOf[StringDeserializer],
+      "value.deserializer" -> classOf[StringDeserializer],
+      "auto.offset.reset" -> "latest",
+      "enable.auto.commit" -> (false: java.lang.Boolean)
+    )
 
-    val topicMap = kafkaTopic.split(",").map((_, kafkaThreadNum.toInt)).toMap
+    val topics = Set("user_payment")
 
-    //Kafka数据格式: userName, payment
-    // 例如: kigo, 8
-    //用户->消费金额
-    val user_payment = KafkaUtils.createStream(ssc, zkQuorum, consumerGroupName, topicMap).map(x=>{
-      x._2.trim
+    // 使用新版 KafkaUtils.createDirectStream 方法
+    val user_payment = KafkaUtils.createDirectStream[String, String](
+      ssc,
+      LocationStrategies.PreferConsistent,
+      ConsumerStrategies.Subscribe[String, String](topics, kafkaParams)
+    ).map(record => {
+      record.value.trim
     })
 
-    //对一分钟的数据进行计算
-    val paymentSum = user_payment.map(line =>{
+    // 对一分钟的数据进行计算
+    val paymentSum = user_payment.map(line => {
       val tp = line.split(",")
       val user = tp(0)
-      val payment  = tp(1)
-      (user,payment.toDouble)
-    }).reduceByKey(_+_)
+      val payment = tp(1).toDouble
+      (user, payment)
+    }).reduceByKey(_ + _)
 
-
-    //输出每分钟的计算结果
+    // 输出每分钟的计算结果
     paymentSum.print()
 
-    //将以前的数据和最新一分钟的数据进行求和
-    val addFunction = (currValues : Seq[Double],preVauleState : Option[Double]) => {
+    // 将以前的数据和最新一分钟的数据进行求和
+    val addFunction = (currValues: Seq[Double], prevState: Option[Double]) => {
       val currentSum = currValues.sum
-      val previousSum = preVauleState.getOrElse(0.0)
+      val previousSum = prevState.getOrElse(0.0)
       Some(currentSum + previousSum)
     }
 
     val totalPayment = paymentSum.updateStateByKey[Double](addFunction)
 
-    //输出总计的结果
+    // 输出总计的结果
     totalPayment.print()
     ssc
   }
 
-  //如果"checkPoint"中存在以前的记录，则重启streamingContext,读取以前保存的数据，否则创建新的StreamingContext
+  // 如果"checkPoint"中存在以前的记录，则重启streamingContext,读取以前保存的数据，否则创建新的StreamingContext
   val context = StreamingContext.getOrCreate("checkPoint", functionToCreateContext _)
 
   context.start()
   context.awaitTermination()
 }
 
-object KafkaProducer extends App{
+object KafkaProducer extends App {
 
-  //所有用户
+  // 所有用户
   private val users = Array(
     "Kigo", "Gao",
-    "Li", "Youtong")
+    "Li", "Youtong"
+  )
 
   private val random = new Random
 
-  //消费的金额（0-9）
-  def payMount() : Double = {
+  // 消费的金额（0-9）
+  def payMount(): Double = {
     random.nextInt(10)
   }
 
-  //随机获得用户名称
-  def getUserName() : String = {
+  // 随机获得用户名称
+  def getUserName(): String = {
     users(random.nextInt(users.length))
   }
 
-  //kafka参数
+  // Kafka参数
   val topic = "user_payment"
   val brokers = "127.0.0.1:9092,localhost:9092"
   val props = new Properties()
   props.put("metadata.broker.list", brokers)
   props.put("serializer.class", "kafka.serializer.StringEncoder")
 
-  val kafkaConfig = new ProducerConfig(props)
-  val producer = new Producer[String, String](kafkaConfig)
+//  val kafkaConfig = new ProducerConfig(props)
+  val producer = {
+    new KafkaProducer[String, String](props)
+  }
 
-  while(true) {
+  while (true) {
     // 创建消息
-    val event = getUserName+"," + payMount()
+    val event = getUserName + "," + payMount()
     // 往kafka发送数据
-    producer.send(new KeyedMessage[String, String](topic, event.toString))
+    producer.send(new ProducerRecord[String, String](topic, event.toString))
     println("Message sent: " + event)
 
-    //每隔200ms发送一条数据
+    // 每隔200ms发送一条数据
     Thread.sleep(200)
   }
 }
-

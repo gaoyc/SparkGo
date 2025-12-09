@@ -3,10 +3,11 @@ package com.kigo.framework.log4j2
 import java.io.File
 
 import org.apache.commons.logging.LogFactory
-import org.apache.spark.{Logging, SparkContext}
+import org.apache.spark.SparkContext
 import org.junit.Test
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.apache.spark.internal.Logging
 
 /**
   * Created by Kigo on 18-7-3.
